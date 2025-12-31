@@ -6,17 +6,21 @@ import pandas as pd
 # --- 1. Page Config ---
 st.set_page_config(page_title="3D BEC Profiler", layout="wide")
 st.title("3D Thomas-Fermi BEC Density Explorer")
-st.markdown("Enter precise experimental parameters to calculate the 3D density profile.")
+st.markdown("Enter precise experimental parameters to calculate the 3D density profile of the condensate.")
 
-# --- 2. Sidebar UI (Updated to Number Inputs) ---
+# --- 2. Sidebar UI & Reset Logic ---
 st.sidebar.header("Input Parameters")
+
+# Reset Functionality
+if st.sidebar.button("Reset to Defaults"):
+    st.rerun()
 
 species_option = st.sidebar.selectbox(
     "Particle Species", 
-    ["Li-7", "Na-23", "K-39", "Cs-133", "Cs2-Molecule"]
+    ["Li-7", "Na-23", "K-39", "Cs-133", "Cs2-Molecule"],
+    index=3  # Defaults to Cs-133
 )
 
-# Changed from slider to number_input for precision
 n_particles = st.sidebar.number_input(
     "Total Particle Number (N)", 
     min_value=0, 
@@ -25,7 +29,6 @@ n_particles = st.sidebar.number_input(
     step=1000
 )
 
-# Changed from slider to number_input for precision
 a_bohr = st.sidebar.number_input(
     "Scattering Length (a_0)", 
     min_value=-5000, 
@@ -39,7 +42,7 @@ f_x = st.sidebar.number_input("fx (Transverse)", value=10.0, step=0.1)
 f_y = st.sidebar.number_input("fy (Transverse)", value=10.0, step=0.1)
 f_z = st.sidebar.number_input("fz (Axial)", value=150.0, step=1.0)
 
-# --- 3. Physics Logic ---
+# --- 3. Physics Logic (Thomas-Fermi Approximation) ---
 hbar = 1.0545718e-34      
 m_u = 1.6605390e-27       
 a0 = 5.2917721e-11        
@@ -57,14 +60,13 @@ a_s = a_bohr * a0
 omega = 2 * np.pi * np.array([f_x, f_y, f_z])
 omega_mean = np.prod(omega)**(1/3)
 
-# Thomas-Fermi Calculations
-# Handle case where a_s is 0 to avoid division by zero
-if a_s > 0:
+# Handle physical stability (a_s must be positive for 3D TF)
+if a_s > 0 and n_particles > 0:
     g = 4 * np.pi * hbar**2 * a_s / mass
     a_ho = np.sqrt(hbar / (mass * omega_mean))
     mu = (hbar * omega_mean / 2) * (15 * n_particles * a_s / a_ho)**(2/5)
-    R = np.sqrt(2 * mu / (mass * omega**2)) * 1e6
-    n0_um3 = (mu / g * 1e-18)
+    R = np.sqrt(2 * mu / (mass * omega**2)) * 1e6 # convert to microns
+    n0_um3 = (mu / g * 1e-18) # convert m^-3 to um^-3
 else:
     mu = 0
     R = np.array([0, 0, 0])
@@ -73,11 +75,13 @@ else:
 # --- 4. Main Display & Plotting ---
 if st.button("Run Simulation"):
     if a_s <= 0:
-        st.error("Scattering length must be positive for a stable 3D BEC in this model.")
+        st.error("The scattering length must be positive ($a_0 > 0$) for a stable 3D condensate in this model.")
+    elif n_particles <= 0:
+        st.warning("Please enter a particle number greater than 0.")
     else:
         col1, col2 = st.columns([2, 1])
 
-        # Generate Data
+        # Generate Data for Plot and CSV
         z_axis = np.linspace(-R[2]*1.2, R[2]*1.2, 1000)
         density_z = n0_um3 * np.maximum(0, 1 - (z_axis/R[2])**2)
         
@@ -87,15 +91,17 @@ if st.button("Run Simulation"):
         })
 
         with col1:
+            
             fig, ax = plt.subplots(figsize=(8, 4))
             ax.plot(z_axis, density_z, lw=3, color='teal')
             ax.fill_between(z_axis, density_z, color='teal', alpha=0.2)
             ax.set_title(f"3D Density Profile along Z-axis: {species_option}")
-            ax.set_xlabel(r"Position $z$ ($\mu$m)")
+            ax.set_xlabel(r"Axial Position $z$ ($\mu$m)")
             ax.set_ylabel(r"3D Density $n$ (particles/$\mu$m$^3$)")
             ax.grid(True, linestyle='--', alpha=0.6)
             st.pyplot(fig)
             
+            # Download Button
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="📥 Download Density Data as CSV",
@@ -111,6 +117,7 @@ if st.button("Run Simulation"):
             st.write(f"**Peak 3D Density:** {n0_um3:.6f} particles/µm³")
             
             st.divider()
+            
             st.write("**Thomas-Fermi Radii:**")
             st.write(f"Rx: {R[0]:.2f} µm")
             st.write(f"Ry: {R[1]:.2f} µm")
@@ -121,4 +128,4 @@ if st.button("Run Simulation"):
             st.write(f"Particle Count: {n_particles:,}")
             st.write(f"Aspect Ratio (fz/fx): {f_z/f_x:.2f}")
 else:
-    st.info("Enter your parameters and click 'Run Simulation'.")
+    st.info("Adjust the parameters and click 'Run Simulation' to see the profile.")
